@@ -39,7 +39,8 @@ export default async function handler(req, res) {
 
     // 6. Payload Construction
     const payload = {
-      model: "google/gemini-pro",
+      model: "google/gemini-2.5-flash-lit"
+,
       messages: [{
         role: "user",
         content: `Explain this in simple terms (under 100 words): ${cleanText}`
