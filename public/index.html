@@ -13,19 +13,10 @@
         body {
             font-family: 'Inter', sans-serif;
         }
-        ::-webkit-scrollbar {
-            width: 8px;
-        }
-        ::-webkit-scrollbar-track {
-            background: #1e293b;
-        }
-        ::-webkit-scrollbar-thumb {
-            background: #475569;
-            border-radius: 10px;
-        }
-        ::-webkit-scrollbar-thumb:hover {
-            background: #64748b;
-        }
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #1e293b; }
+        ::-webkit-scrollbar-thumb { background: #475569; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #64748b; }
         .glassmorphism {
             background: rgba(30, 41, 59, 0.6);
             backdrop-filter: blur(10px);
@@ -55,6 +46,12 @@
 
             <div id="viewer-section" class="hidden">
                 <div id="text-display-container" class="bg-slate-900/70 rounded-lg p-4 h-96 overflow-y-auto border border-slate-700 mb-4">
+                    <div class="flex justify-between items-center mb-2">
+                        <h3 id="page-title" class="text-lg font-bold text-cyan-400">Page</h3>
+                        <button id="copy-page-btn" class="text-xs bg-gradient-to-r from-indigo-500 to-cyan-500 text-white px-3 py-1 rounded hover:from-indigo-600 hover:to-cyan-600 transition hidden">
+                            📋 Copy Page
+                        </button>
+                    </div>
                     <div id="text-display" class="whitespace-pre-wrap text-slate-300">
                         Select a PDF to get started.
                     </div>
@@ -76,10 +73,8 @@
     </div>
 
     <script>
-        // Set up PDF.js worker
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.worker.min.js';
 
-        // DOM Elements
         const uploadInput = document.getElementById('pdf-upload');
         const fileNameDisplay = document.getElementById('file-name');
         const uploadSection = document.getElementById('upload-section');
@@ -89,12 +84,12 @@
         const nextButton = document.getElementById('next-page');
         const pageIndicator = document.getElementById('page-indicator');
         const explainButton = document.getElementById('explain-button');
+        const copyPageBtn = document.getElementById('copy-page-btn');
+        const pageTitle = document.getElementById('page-title');
 
-        // App State
         let pdfDoc = null;
         let currentPageNum = 1;
 
-        // --- Helper Functions ---
         function clearExplanations() {
             const explanations = document.querySelectorAll('.explanation-container');
             explanations.forEach(el => el.remove());
@@ -102,18 +97,29 @@
 
         function appendExplanation(explanation) {
             clearExplanations();
-            
             const explanationEl = document.createElement('div');
             explanationEl.className = 'explanation-container mt-4 p-4 bg-slate-800/50 rounded-lg border border-slate-700';
             explanationEl.innerHTML = `
-                <h4 class="text-lg font-bold text-green-400 mb-2">🧠 AI Explanation</h4>
+                <div class="flex justify-between items-center mb-2">
+                    <h4 class="text-lg font-bold text-green-400">🧠 AI Explanation</h4>
+                    <button class="copy-explanation-btn text-xs bg-gradient-to-r from-indigo-500 to-cyan-500 text-white px-3 py-1 rounded hover:from-indigo-600 hover:to-cyan-600 transition">
+                        📋 Copy
+                    </button>
+                </div>
                 <p class="text-slate-300">${explanation}</p>
             `;
             textDisplay.appendChild(explanationEl);
+
+            // Copy explanation text
+            explanationEl.querySelector('.copy-explanation-btn').addEventListener('click', () => {
+                navigator.clipboard.writeText(explanation).then(() => {
+                    alert('✅ Explanation copied to clipboard!');
+                });
+            });
+
             explanationEl.scrollIntoView({ behavior: 'smooth' });
         }
 
-        // --- PDF Handling ---
         uploadInput.addEventListener('change', (event) => {
             const file = event.target.files[0];
             if (file && file.type === 'application/pdf') {
@@ -142,11 +148,8 @@
 
         async function renderPage(num) {
             if (!pdfDoc) return;
-
             explainButton.disabled = true;
-            explainButton.textContent = '🧠 Explain Page';
             clearExplanations();
-            
             textDisplay.innerHTML = `<p class="text-slate-400">Loading page ${num}...</p>`;
 
             try {
@@ -155,23 +158,27 @@
                 const pageText = textContent.items.map(item => item.str).join(' ');
 
                 textDisplay.innerHTML = '';
-                const header = document.createElement('h3');
-                header.className = 'text-lg font-bold text-cyan-400 mb-2';
-                header.textContent = `Page ${num}`;
-                
+                pageTitle.textContent = `Page ${num}`;
                 const content = document.createElement('p');
                 content.textContent = pageText.trim() ? pageText : '[No text found on this page.]';
-
-                textDisplay.appendChild(header);
                 textDisplay.appendChild(content);
+
+                // Show or hide copy button
+                copyPageBtn.classList.toggle('hidden', !pageText.trim());
+                copyPageBtn.onclick = () => {
+                    navigator.clipboard.writeText(pageText).then(() => {
+                        alert('✅ Page text copied to clipboard!');
+                    });
+                };
 
                 updateControls();
             } catch (err) {
                 console.error('Error rendering page:', err);
                 textDisplay.textContent = `Error rendering page ${num}.`;
+                copyPageBtn.classList.add('hidden');
             } finally {
                 explainButton.disabled = !textDisplay.querySelector('p')?.textContent.trim() || 
-                                      textDisplay.querySelector('p').textContent === '[No text found on this page.]';
+                                          textDisplay.querySelector('p').textContent === '[No text found on this page.]';
             }
         }
 
@@ -195,18 +202,14 @@
             }
         });
 
-        // --- AI Explanation ---
         explainButton.addEventListener('click', async () => {
             const pageText = textDisplay.querySelector('p')?.textContent || '';
-
             if (!pageText || pageText === '[No text found on this page.]') {
                 appendExplanation('[No text on this page to explain.]');
                 return;
             }
-
             explainButton.disabled = true;
             explainButton.textContent = 'Thinking...';
-            
             try {
                 const explanation = await getExplanationFromGemini(pageText);
                 appendExplanation(explanation);
@@ -222,17 +225,13 @@
         async function getExplanationFromGemini(text) {
             const response = await fetch('/api/explain-pdf', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ text: text }),
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text })
             });
-
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({}));
                 throw new Error(errorData.error || `Request failed with status ${response.status}`);
             }
-
             const result = await response.json();
             return result.explanation;
         }
