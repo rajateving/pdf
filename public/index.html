@@ -39,6 +39,20 @@
         #explanation-container {
             display: none;
         }
+        #loading-spinner {
+            display: none;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top: 2px solid white;
+            width: 16px;
+            height: 16px;
+            animation: spin 1s linear infinite;
+            margin-left: 8px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body class="bg-slate-900 text-slate-200 antialiased flex flex-col items-center justify-center min-h-screen p-4">
@@ -83,8 +97,9 @@
                         <button id="next-page" class="px-4 py-2 rounded-md bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed transition">Next ➡️</button>
                     </div>
 
-                    <button id="explain-button" class="w-full sm:w-auto bg-gradient-to-r from-indigo-500 to-cyan-500 hover:from-indigo-600 hover:to-cyan-600 text-white font-bold py-3 px-8 rounded-lg transition-transform transform hover:scale-105 shadow-md disabled:opacity-50 disabled:cursor-wait">
-                        🧠 Explain Page
+                    <button id="explain-button" class="w-full sm:w-auto bg-gradient-to-r from-indigo-500 to-cyan-500 hover:from-indigo-600 hover:to-cyan-600 text-white font-bold py-3 px-8 rounded-lg transition-transform transform hover:scale-105 shadow-md disabled:opacity-50 disabled:cursor-wait flex items-center justify-center">
+                        � Explain Page
+                        <span id="loading-spinner"></span>
                     </button>
                 </div>
             </div>
@@ -113,10 +128,13 @@
         const explanationText = document.getElementById('explanation-text');
         const copyExplanationBtn = document.getElementById('copy-explanation-btn');
         const copyPageBtn = document.getElementById('copy-page-btn');
+        const loadingSpinner = document.getElementById('loading-spinner');
 
         // App State
         let pdfDoc = null;
         let currentPageNum = 1;
+        let isProcessing = false;
+        const MAX_CHARS = 15000;
 
         // --- Helper Functions ---
         function copyToClipboard(text, button) {
@@ -141,23 +159,23 @@
             explanationContainer.style.display = 'block';
             
             // Setup copy explanation button
-            copyExplanationBtn.addEventListener('click', () => {
+            copyExplanationBtn.onclick = () => {
                 copyToClipboard(explanation, copyExplanationBtn);
-            });
+            };
             
             explanationContainer.scrollIntoView({ behavior: 'smooth' });
         }
 
         // Setup copy page button
         copyPageBtn.addEventListener('click', () => {
-            const pageContent = document.body.innerText;
+            const pageContent = textDisplay.innerText;
             copyToClipboard(pageContent, copyPageBtn);
         });
 
         // --- PDF Handling ---
         uploadInput.addEventListener('change', (event) => {
             const file = event.target.files[0];
-            if (file && file.type === 'application/pdf') {
+            if (file && file.type === 'application/pdf") {
                 fileNameDisplay.textContent = `Loading: ${file.name}...`;
                 const fileReader = new FileReader();
                 fileReader.onload = function() {
@@ -169,6 +187,7 @@
                         viewerSection.classList.remove('hidden');
                         uploadSection.querySelector('label').textContent = '📂 Change PDF';
                         fileNameDisplay.textContent = `✅ Loaded: ${file.name}`;
+                        sessionStorage.setItem('lastPDF', file.name);
                         renderPage(currentPageNum);
                     }, reason => {
                         console.error(reason);
@@ -184,11 +203,20 @@
         async function renderPage(num) {
             if (!pdfDoc) return;
 
+            isProcessing = true;
             explainButton.disabled = true;
             explainButton.textContent = '🧠 Explain Page';
             clearExplanations();
             
-            textDisplay.innerHTML = `<p class="text-slate-400">Loading page ${num}...</p>`;
+            // Show loading skeleton
+            textDisplay.innerHTML = `
+                <div class="animate-pulse">
+                    <div class="h-6 w-1/4 bg-slate-700 rounded mb-4"></div>
+                    <div class="space-y-2">
+                        ${Array(5).fill('<div class="h-4 bg-slate-800 rounded"></div>').join('')}
+                    </div>
+                </div>
+            `;
 
             try {
                 const page = await pdfDoc.getPage(num);
@@ -206,6 +234,14 @@
                 textDisplay.appendChild(header);
                 textDisplay.appendChild(content);
 
+                // Add warning if text is too long
+                if (pageText.length > MAX_CHARS) {
+                    const warning = document.createElement('div');
+                    warning.className = 'text-yellow-400 text-sm mt-2';
+                    warning.textContent = `⚠️ Note: Only first ${MAX_CHARS.toLocaleString()} characters will be explained`;
+                    textDisplay.appendChild(warning);
+                }
+
                 updateControls();
             } catch (err) {
                 console.error('Error rendering page:', err);
@@ -213,6 +249,7 @@
             } finally {
                 explainButton.disabled = !textDisplay.querySelector('p')?.textContent.trim() || 
                                       textDisplay.querySelector('p').textContent === '[No text found on this page.]';
+                isProcessing = false;
             }
         }
 
@@ -223,14 +260,27 @@
         }
 
         prevButton.addEventListener('click', () => {
-            if (currentPageNum > 1) {
+            if (currentPageNum > 1 && !isProcessing) {
                 currentPageNum--;
                 renderPage(currentPageNum);
             }
         });
 
         nextButton.addEventListener('click', () => {
-            if (currentPageNum < pdfDoc.numPages) {
+            if (currentPageNum < pdfDoc.numPages && !isProcessing) {
+                currentPageNum++;
+                renderPage(currentPageNum);
+            }
+        });
+
+        // Keyboard navigation
+        document.addEventListener('keydown', (e) => {
+            if (!pdfDoc || isProcessing) return;
+            
+            if (e.key === 'ArrowLeft' && currentPageNum > 1) {
+                currentPageNum--;
+                renderPage(currentPageNum);
+            } else if (e.key === 'ArrowRight' && currentPageNum < pdfDoc.numPages) {
                 currentPageNum++;
                 renderPage(currentPageNum);
             }
@@ -238,15 +288,20 @@
 
         // --- AI Explanation ---
         explainButton.addEventListener('click', async () => {
+            if (isProcessing) return;
+            isProcessing = true;
+            
             const pageText = textDisplay.querySelector('p')?.textContent || '';
 
             if (!pageText || pageText === '[No text found on this page.]') {
                 appendExplanation('[No text on this page to explain.]');
+                isProcessing = false;
                 return;
             }
 
             explainButton.disabled = true;
             explainButton.textContent = 'Thinking...';
+            loadingSpinner.style.display = 'inline-block';
             
             try {
                 const explanation = await getExplanationFromGemini(pageText);
@@ -257,26 +312,56 @@
             } finally {
                 explainButton.textContent = '🧠 Explain Page';
                 explainButton.disabled = !pageText || pageText === '[No text found on this page.]';
+                loadingSpinner.style.display = 'none';
+                isProcessing = false;
             }
         });
 
         async function getExplanationFromGemini(text) {
-            const response = await fetch('/api/explain-pdf', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ text: text }),
-            });
+            try {
+                const response = await fetch('/api/explain-pdf', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ 
+                        text: text.substring(0, MAX_CHARS) 
+                    }),
+                });
 
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({}));
-                throw new Error(errorData.error || `Request failed with status ${response.status}`);
+                if (!response.ok) {
+                    let errorData = {};
+                    try {
+                        errorData = await response.json();
+                    } catch (e) {
+                        console.error('Error parsing error response:', e);
+                    }
+                    
+                    throw new Error(
+                        errorData.error || 
+                        errorData.message || 
+                        `AI service unavailable (Status: ${response.status})`
+                    );
+                }
+
+                const result = await response.json();
+                if (!result.explanation) {
+                    throw new Error('Received empty explanation from AI');
+                }
+                return result.explanation;
+            } catch (error) {
+                console.error('API Call Error:', error);
+                throw new Error(`Failed to get explanation: ${error.message}`);
             }
-
-            const result = await response.json();
-            return result.explanation;
         }
+
+        // Check for last PDF on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            const lastPDF = sessionStorage.getItem('lastPDF');
+            if (lastPDF) {
+                fileNameDisplay.textContent = `Last opened: ${lastPDF}`;
+            }
+        });
     </script>
 </body>
 </html>
