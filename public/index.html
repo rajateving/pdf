@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI PDF Explainer</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.min.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -14,54 +13,84 @@
         ::-webkit-scrollbar { width: 8px; }
         ::-webkit-scrollbar-track { background: #1e293b; }
         ::-webkit-scrollbar-thumb { background: #475569; border-radius: 10px; }
-        .glassmorphism { background: rgba(30, 41, 59, 0.6); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid rgba(71, 85, 105, 0.3); }
-        #loading-spinner { display: none; border: 2px solid rgba(255,255,255,0.3); border-radius: 50%; border-top: 2px solid white; width: 16px; height: 16px; animation: spin 1s linear infinite; margin-left: 8px; }
-        .error-message { background-color: rgba(239, 68, 68, 0.2); border-left: 4px solid #ef4444; padding: 12px; margin: 12px 0; border-radius: 4px; }
-        .debug-info { font-family: monospace; font-size: 12px; white-space: pre-wrap; word-break: break-all; background-color: rgba(30, 41, 59, 0.8); padding: 8px; border-radius: 4px; overflow-x: auto; }
+        .glassmorphism {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(71, 85, 105, 0.3);
+        }
+        #loading-spinner {
+            display: none;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top: 2px solid white;
+            width: 16px;
+            height: 16px;
+            animation: spin 1s linear infinite;
+        }
+        .error-message { background-color: rgba(239, 68, 68, 0.2); border-left: 4px solid #ef4444; padding: 1rem; }
+        .debug-info { font-family: monospace; font-size: 0.75rem; white-space: pre-wrap; word-break: break-all; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
 </head>
-<body class="bg-slate-900 text-slate-200 flex flex-col items-center min-h-screen p-4">
-    <div class="w-full max-w-4xl mx-auto">
+<body class="bg-slate-900 text-slate-200 flex flex-col items-center min-h-screen p-4 sm:p-6">
+    <div class="w-full max-w-5xl mx-auto">
         <header class="text-center mb-6">
-            <h1 class="text-4xl md:text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-cyan-400">📖 AI PDF Explainer</h1>
-            <p class="text-slate-400 mt-2">Upload a PDF, and let AI explain each page in simple terms.</p>
+            <h1 class="text-3xl sm:text-4xl md:text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-cyan-400">
+                AI PDF Explainer
+            </h1>
+            <p class="text-slate-400 mt-2 text-sm sm:text-base">Upload a PDF, and let AI simplify it for you.</p>
         </header>
 
-        <div class="glassmorphism rounded-2xl shadow-2xl p-6 md:p-8 w-full">
-            <div id="upload-section" class="text-center mb-6">
-                <label for="pdf-upload" class="cursor-pointer inline-block bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-6 rounded-lg transition-transform transform hover:scale-105 shadow-lg">📂 Open PDF</label>
+        <main class="glassmorphism rounded-2xl shadow-2xl p-4 sm:p-6 w-full">
+            <div id="upload-section" class="text-center">
+                <label for="pdf-upload" class="cursor-pointer inline-block bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-6 rounded-lg transition-transform transform hover:scale-105 shadow-lg">
+                    📂 Open PDF
+                </label>
                 <input type="file" id="pdf-upload" class="hidden" accept=".pdf">
                 <p id="file-name" class="text-slate-400 mt-3 text-sm"></p>
-                <div id="upload-error" class="error-message hidden"></div>
+                <div id="upload-error" class="error-message rounded-md hidden mt-4"></div>
             </div>
 
             <div id="viewer-section" class="hidden">
-                <div id="text-display-container" class="bg-slate-900/70 rounded-lg p-4 h-96 overflow-y-auto border border-slate-700 mb-4">
-                    <div id="text-display" class="whitespace-pre-wrap text-slate-300">Select a PDF to get started.</div>
-                    <div id="explanation-container" class="mt-4 p-4 bg-slate-800/50 rounded-lg border border-slate-700 hidden">
-                        <h4 class="text-lg font-bold text-green-400">🧠 AI Explanation</h4>
-                        <p id="explanation-text" class="text-slate-300 mt-2"></p>
-                        <div id="api-error" class="error-message hidden mt-4"></div>
-                    </div>
+                <div class="bg-slate-900/70 rounded-lg p-4 h-[60vh] sm:h-96 overflow-y-auto border border-slate-700">
+                    <div id="text-display" class="whitespace-pre-wrap text-slate-300 leading-relaxed">Select a PDF to get started.</div>
                 </div>
-                <div class="flex flex-col sm:flex-row items-center justify-between gap-4">
-                    <div class="flex items-center gap-3 bg-slate-900/70 p-2 rounded-lg">
-                        <button id="prev-page" class="px-4 py-2 rounded-md bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed transition">⬅</button>
-                        <span id="page-indicator" class="font-mono text-slate-300">Page 0 / 0</span>
-                        <button id="next-page" class="px-4 py-2 rounded-md bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed transition">➡</button>
+
+                <div class="flex flex-col sm:flex-row items-center justify-between gap-4 mt-4">
+                    <div class="flex items-center gap-3 bg-slate-900/70 p-2 rounded-lg w-full sm:w-auto justify-center">
+                        <button id="prev-page" class="px-4 py-2 rounded-md bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed transition">⬅</button>
+                        <span id="page-indicator" class="font-mono text-slate-300 text-sm">Page 0 / 0</span>
+                        <button id="next-page" class="px-4 py-2 rounded-md bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed transition">➡</button>
                     </div>
-                    <button id="explain-button" class="w-full sm:w-auto bg-gradient-to-r from-indigo-500 to-cyan-500 hover:from-indigo-600 hover:to-cyan-600 text-white font-bold py-3 px-8 rounded-lg transition-transform transform hover:scale-105 shadow-md disabled:opacity-50 disabled:cursor-wait flex items-center justify-center">
-                        Explain Page <span id="loading-spinner"></span>
+                    <button id="explain-button" class="w-full sm:w-auto bg-gradient-to-r from-indigo-500 to-cyan-500 hover:from-indigo-600 hover:to-cyan-600 text-white font-bold py-3 px-6 rounded-lg transition-transform transform hover:scale-105 shadow-md disabled:opacity-50 disabled:cursor-wait flex items-center justify-center gap-2">
+                        <span id="explain-button-text">Explain This Page</span>
+                        <div id="loading-spinner"></div>
                     </button>
                 </div>
-            </div>
-        </div>
-    </div>
-    <script>
-        const pdfjsLib = window['pdfjs-dist/build/pdf'];
-        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@2.11.338/build/pdf.worker.min.js';
 
+                <div id="explanation-container" class="mt-6 p-4 bg-slate-800/50 rounded-lg border border-slate-700 hidden">
+                    <div class="flex justify-between items-center mb-2">
+                        <h4 class="text-lg font-bold text-green-400">🧠 AI Explanation</h4>
+                        <button id="copy-explanation-btn" title="Copy explanation" class="p-2 rounded-md bg-slate-700 hover:bg-slate-600 transition">
+                            </button>
+                    </div>
+                    <p id="explanation-text" class="text-slate-300 leading-relaxed"></p>
+                    <div id="api-error" class="error-message rounded-md hidden mt-4"></div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <button id="copy-page-btn" title="Copy page text" class="hidden fixed bottom-6 right-6 bg-indigo-600 hover:bg-indigo-700 text-white font-bold p-4 rounded-full shadow-lg transition-all transform hover:scale-110">
+        </button>
+
+    <script>
+        // PDF.js setup
+        const pdfjsLib = window['pdfjs-dist/build/pdf'];
+        pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+
+        // DOM Elements
         const uploadInput = document.getElementById('pdf-upload');
         const fileNameDisplay = document.getElementById('file-name');
         const uploadError = document.getElementById('upload-error');
@@ -71,16 +100,27 @@
         const nextButton = document.getElementById('next-page');
         const pageIndicator = document.getElementById('page-indicator');
         const explainButton = document.getElementById('explain-button');
+        const explainButtonText = document.getElementById('explain-button-text');
         const explanationContainer = document.getElementById('explanation-container');
         const explanationText = document.getElementById('explanation-text');
         const apiError = document.getElementById('api-error');
         const loadingSpinner = document.getElementById('loading-spinner');
+        const copyPageBtn = document.getElementById('copy-page-btn');
+        const copyExplanationBtn = document.getElementById('copy-explanation-btn');
 
+        // SVG Icons
+        const clipboardIcon = `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>`;
+        const checkIcon = `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>`;
+        copyPageBtn.innerHTML = clipboardIcon;
+        copyExplanationBtn.innerHTML = clipboardIcon;
+
+        // App State
         let pdfDoc = null;
         let currentPageNum = 1;
         let isProcessing = false;
         const API_ENDPOINT = '/api/explain-pdf';
 
+        // --- Helper Functions ---
         const showError = (element, message, details = null) => {
             let content = `<p class="font-bold">${message}</p>`;
             if (details) {
@@ -95,13 +135,24 @@
             element.classList.add('hidden');
         };
 
+        const copyToClipboard = (text, button) => {
+            if (!text) return;
+            navigator.clipboard.writeText(text).then(() => {
+                button.innerHTML = checkIcon;
+                setTimeout(() => { button.innerHTML = clipboardIcon; }, 2000);
+            }).catch(err => {
+                console.error('Copy failed:', err);
+                alert("Could not copy text.");
+            });
+        };
+
         const renderPage = async (num) => {
             if (!pdfDoc) return;
             isProcessing = true;
             explainButton.disabled = true;
             explanationContainer.classList.add('hidden');
             clearError(apiError);
-            textDisplay.textContent = 'Loading page content...';
+            textDisplay.textContent = 'Loading page...';
 
             try {
                 const page = await pdfDoc.getPage(num);
@@ -121,6 +172,7 @@
             }
         };
 
+        // --- Event Listeners ---
         uploadInput.addEventListener('change', async (event) => {
             const file = event.target.files[0];
             if (!file || file.type !== 'application/pdf') {
@@ -134,7 +186,9 @@
                 const arrayBuffer = await file.arrayBuffer();
                 pdfDoc = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
                 fileNameDisplay.textContent = `✅ Loaded: ${file.name}`;
+                document.getElementById('upload-section').classList.add('hidden');
                 viewerSection.classList.remove('hidden');
+                copyPageBtn.classList.remove('hidden');
                 renderPage(1);
             } catch (error) {
                 console.error('PDF Load Error:', error);
@@ -146,43 +200,43 @@
         prevButton.addEventListener('click', () => !isProcessing && currentPageNum > 1 && renderPage(currentPageNum - 1));
         nextButton.addEventListener('click', () => !isProcessing && currentPageNum < pdfDoc.numPages && renderPage(currentPageNum + 1));
 
+        copyPageBtn.addEventListener('click', () => copyToClipboard(textDisplay.textContent, copyPageBtn));
+        copyExplanationBtn.addEventListener('click', () => copyToClipboard(explanationText.textContent, copyExplanationBtn));
+
         explainButton.addEventListener('click', async () => {
             if (isProcessing) return;
             isProcessing = true;
             explainButton.disabled = true;
+            explainButtonText.textContent = 'Thinking...';
             loadingSpinner.style.display = 'inline-block';
             clearError(apiError);
-
-            const pageText = textDisplay.textContent;
 
             try {
                 const response = await fetch(API_ENDPOINT, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ text: pageText, page_number: currentPageNum }),
+                    body: JSON.stringify({ text: textDisplay.textContent, page_number: currentPageNum }),
                 });
 
                 const result = await response.json();
-
-                if (!response.ok) {
-                    throw result;
-                }
+                if (!response.ok) throw result;
 
                 explanationText.textContent = result.explanation;
                 explanationContainer.classList.remove('hidden');
-                explanationContainer.scrollIntoView({ behavior: 'smooth' });
+                explanationContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
             } catch (error) {
                 console.error('Explanation Fetch Error:', error);
-                const errorMessage = error.error || 'Failed to get explanation.';
-                const errorDetails = error.details || { hint: 'Check the browser console (F12) and your server logs for more information.' };
+                const errorMessage = error.error || 'An unknown error occurred.';
+                const errorDetails = error.details || { hint: 'Check the browser console (F12) and server logs.' };
                 showError(apiError, errorMessage, errorDetails);
                 explanationContainer.classList.remove('hidden');
-                explanationText.textContent = 'An error occurred. See details below.';
-                explanationContainer.scrollIntoView({ behavior: 'smooth' });
+                explanationText.textContent = 'Could not get explanation. See details below.';
+                explanationContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
             } finally {
                 isProcessing = false;
                 explainButton.disabled = false;
+                explainButtonText.textContent = 'Explain This Page';
                 loadingSpinner.style.display = 'none';
             }
         });
