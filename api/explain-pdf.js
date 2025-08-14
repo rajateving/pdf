@@ -1,6 +1,6 @@
 const errorResponse = (res, status, error, details = {}) => {
     const errorId = Math.random().toString(36).substring(2, 9);
-    console.error(`API Error [${status}][${errorId}]:`, { error, ...details });
+    console.error(API Error [${status}][${errorId}]:, { error, ...details });
     return res.status(status).json({
         success: false,
         error,
@@ -75,7 +75,7 @@ export default async function handler(req, res) {
             model: "google/gemini-2.5-flash-lite",
             messages: [{
                 role: "user",
-                content: `Explain this PDF content from page ${pageNumber} in simple terms (100-150 words):\n\n${cleanText}`
+                content: Explain this PDF content from page ${pageNumber} in simple terms (100-150 words):\n\n${cleanText}
             }],
             temperature: 0.7,
             max_tokens: 300
@@ -89,7 +89,7 @@ export default async function handler(req, res) {
             const response = await fetch(OPENROUTER_API_URL, {
                 method: 'POST',
                 headers: {
-                    'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
+                    'Authorization': Bearer ${process.env.OPENROUTER_API_KEY},
                     'Content-Type': 'application/json',
                     'HTTP-Referer': req.headers.origin || process.env.ALLOWED_ORIGIN || 'https://your-app.vercel.app',
                     'X-Title': 'PDF-Explainer'
@@ -136,5 +136,3 @@ export default async function handler(req, res) {
         });
     }
 }
-
-
