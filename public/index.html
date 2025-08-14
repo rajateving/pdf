@@ -56,7 +56,6 @@
     </style>
 </head>
 <body class="bg-slate-900 text-slate-200 antialiased flex flex-col items-center justify-center min-h-screen p-4">
-
     <div class="w-full max-w-4xl mx-auto">
         <header class="text-center mb-6">
             <h1 class="text-4xl md:text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-cyan-400">
@@ -123,7 +122,6 @@
         // DOM Elements
         const uploadInput = document.getElementById('pdf-upload');
         const fileNameDisplay = document.getElementById('file-name');
-        const uploadSection = document.getElementById('upload-section');
         const viewerSection = document.getElementById('viewer-section');
         const textDisplay = document.getElementById('text-display');
         const prevButton = document.getElementById('prev-page');
@@ -143,17 +141,13 @@
         let isProcessing = false;
         const MAX_CHARS = 15000;
 
-        // --- Helper Functions ---
+        // Helper Functions
         function copyToClipboard(text, button) {
             navigator.clipboard.writeText(text).then(() => {
                 const originalText = button.textContent;
                 button.textContent = 'Copied!';
-                setTimeout(() => {
-                    button.textContent = originalText;
-                }, 2000);
-            }).catch(err => {
-                console.error('Failed to copy:', err);
-            });
+                setTimeout(() => button.textContent = originalText, 2000);
+            }).catch(console.error);
         }
 
         function clearExplanations() {
@@ -164,11 +158,6 @@
         function appendExplanation(explanation) {
             explanationText.textContent = explanation;
             explanationContainer.style.display = 'block';
-            
-            copyExplanationBtn.onclick = () => {
-                copyToClipboard(explanation, copyExplanationBtn);
-            };
-            
             explanationContainer.scrollIntoView({ behavior: 'smooth' });
         }
 
@@ -180,54 +169,42 @@
             }
         }
 
-        // --- PDF Handling ---
+        // PDF Handling
         uploadInput.addEventListener('change', async (event) => {
             const file = event.target.files[0];
             if (!file) return;
 
-            // Better file type validation
             const isPDF = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
-            
-            if (isPDF) {
-                fileNameDisplay.textContent = `Loading: ${file.name}...`;
-                fileNameDisplay.style.color = 'yellow';
-                
-                try {
-                    // Simplified file reading
-                    const arrayBuffer = await file.arrayBuffer();
-                    const typedarray = new Uint8Array(arrayBuffer);
-                    
-                    // More robust PDF loading
-                    const loadingTask = pdfjsLib.getDocument({
-                        data: typedarray,
-                        cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@2.11.338/cmaps/',
-                        cMapPacked: true
-                    });
-                    
-                    const pdf = await loadingTask.promise;
-                    
-                    // Validate PDF
-                    if (pdf.numPages < 1) {
-                        throw new Error('PDF appears to be empty');
-                    }
-                    
-                    pdfDoc = pdf;
-                    currentPageNum = 1;
-                    viewerSection.classList.remove('hidden');
-                    uploadSection.querySelector('label').textContent = '📂 Change PDF';
-                    fileNameDisplay.textContent = `✅ Loaded: ${file.name}`;
-                    fileNameDisplay.style.color = 'lightgreen';
-                    renderPage(currentPageNum);
-                    
-                } catch (error) {
-                    console.error('PDF Error:', error);
-                    fileNameDisplay.textContent = `❌ Error: ${error.message}`;
-                    fileNameDisplay.style.color = 'red';
-                    viewerSection.classList.add('hidden');
-                }
-            } else {
+            if (!isPDF) {
                 fileNameDisplay.textContent = 'Please select a valid PDF file.';
                 fileNameDisplay.style.color = 'red';
+                return;
+            }
+
+            fileNameDisplay.textContent = `Loading: ${file.name}...`;
+            fileNameDisplay.style.color = 'yellow';
+            
+            try {
+                const arrayBuffer = await file.arrayBuffer();
+                const pdf = await pdfjsLib.getDocument({
+                    data: new Uint8Array(arrayBuffer),
+                    cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@2.11.338/cmaps/',
+                    cMapPacked: true
+                }).promise;
+
+                if (pdf.numPages < 1) throw new Error('PDF appears to be empty');
+                
+                pdfDoc = pdf;
+                currentPageNum = 1;
+                viewerSection.classList.remove('hidden');
+                fileNameDisplay.textContent = `✅ Loaded: ${file.name}`;
+                fileNameDisplay.style.color = 'lightgreen';
+                renderPage(currentPageNum);
+            } catch (error) {
+                console.error('PDF Error:', error);
+                fileNameDisplay.textContent = `❌ Error: ${error.message}`;
+                fileNameDisplay.style.color = 'red';
+                viewerSection.classList.add('hidden');
             }
         });
 
@@ -237,36 +214,27 @@
             isProcessing = true;
             explainButton.disabled = true;
             clearExplanations();
-            
+            textDisplay.innerHTML = '<div class="text-slate-400">Loading page content...</div>';
+
             try {
-                // Show loading state
-                textDisplay.innerHTML = '<div class="text-slate-400">Loading page content...</div>';
-                
                 const page = await pdfDoc.getPage(num);
                 const textContent = await page.getTextContent();
                 const pageText = textContent.items.map(item => item.str).join(' ').trim();
                 
-                // Display page content
                 textDisplay.innerHTML = `
                     <h3 class="text-lg font-bold text-cyan-400 mb-2">Page ${num}</h3>
                     <p class="text-slate-300">${pageText || '[No text found on this page.]'}</p>
                 `;
-                
-                // Add warning if text is too long
+
                 if (pageText.length > MAX_CHARS) {
                     const warning = document.createElement('div');
                     warning.className = 'text-yellow-400 text-sm mt-2';
                     warning.textContent = `⚠️ Note: Only first ${MAX_CHARS.toLocaleString()} characters will be explained`;
                     textDisplay.appendChild(warning);
                 }
-                
             } catch (error) {
                 console.error('Page Error:', error);
-                textDisplay.innerHTML = `
-                    <div class="text-red-400">
-                        Error loading page ${num}: ${error.message}
-                    </div>
-                `;
+                textDisplay.innerHTML = `<div class="text-red-400">Error loading page ${num}: ${error.message}</div>`;
             } finally {
                 updateControls();
                 explainButton.disabled = !textDisplay.querySelector('p')?.textContent.trim() || 
@@ -275,41 +243,21 @@
             }
         }
 
-        // --- Navigation ---
-        prevButton.addEventListener('click', () => {
-            if (currentPageNum > 1 && !isProcessing) {
-                currentPageNum--;
-                renderPage(currentPageNum);
-            }
-        });
-
-        nextButton.addEventListener('click', () => {
-            if (currentPageNum < pdfDoc.numPages && !isProcessing) {
-                currentPageNum++;
-                renderPage(currentPageNum);
-            }
-        });
-
-        // Keyboard navigation
+        // Navigation
+        prevButton.addEventListener('click', () => currentPageNum > 1 && !isProcessing && renderPage(--currentPageNum));
+        nextButton.addEventListener('click', () => currentPageNum < pdfDoc.numPages && !isProcessing && renderPage(++currentPageNum));
         document.addEventListener('keydown', (e) => {
             if (!pdfDoc || isProcessing) return;
-            
-            if (e.key === 'ArrowLeft' && currentPageNum > 1) {
-                currentPageNum--;
-                renderPage(currentPageNum);
-            } else if (e.key === 'ArrowRight' && currentPageNum < pdfDoc.numPages) {
-                currentPageNum++;
-                renderPage(currentPageNum);
-            }
+            if (e.key === 'ArrowLeft' && currentPageNum > 1) renderPage(--currentPageNum);
+            if (e.key === 'ArrowRight' && currentPageNum < pdfDoc.numPages) renderPage(++currentPageNum);
         });
 
-        // --- AI Explanation ---
+        // AI Explanation
         explainButton.addEventListener('click', async () => {
             if (isProcessing) return;
             isProcessing = true;
             
             const pageText = textDisplay.querySelector('p')?.textContent || '';
-
             if (!pageText || pageText === '[No text found on this page.]') {
                 appendExplanation('[No text on this page to explain.]');
                 isProcessing = false;
@@ -321,10 +269,26 @@
             loadingSpinner.style.display = 'inline-block';
             
             try {
-                const explanation = await getExplanationFromGemini(pageText);
-                appendExplanation(explanation);
+                const response = await fetch('/api/explain-pdf', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        text: pageText.substring(0, MAX_CHARS),
+                        page_number: currentPageNum
+                    }),
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({}));
+                    throw new Error(errorData.error || `Request failed with status ${response.status}`);
+                }
+
+                const result = await response.json();
+                if (!result.explanation) throw new Error('Received empty explanation from AI');
+                
+                appendExplanation(result.explanation);
             } catch (error) {
-                console.error('Error fetching explanation:', error);
+                console.error('Error:', error);
                 appendExplanation(`Error: ${error.message}`);
             } finally {
                 explainButton.textContent = '🧠 Explain Page';
@@ -334,74 +298,27 @@
             }
         });
 
-        async function getExplanationFromGemini(text) {
-            try {
-                const response = await fetch('/api/explain-pdf', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ 
-                        text: text.substring(0, MAX_CHARS) 
-                    }),
-                });
-
-                if (!response.ok) {
-                    let errorData = {};
-                    try {
-                        errorData = await response.json();
-                    } catch (e) {
-                        console.error('Error parsing error response:', e);
-                    }
-                    
-                    throw new Error(
-                        errorData.error || 
-                        errorData.message || 
-                        `AI service unavailable (Status: ${response.status})`
-                    );
-                }
-
-                const result = await response.json();
-                if (!result.explanation) {
-                    throw new Error('Received empty explanation from AI');
-                }
-                return result.explanation;
-            } catch (error) {
-                console.error('API Call Error:', error);
-                throw new Error(`Failed to get explanation: ${error.message}`);
-            }
-        }
-
-        // --- Debugging ---
+        // Debugging
         debugBtn.addEventListener('click', () => {
             console.log('PDF State:', {
-                pdfDoc: pdfDoc ? {
-                    numPages: pdfDoc.numPages,
-                    fingerprint: pdfDoc.fingerprint
-                } : null,
+                pdfDoc: pdfDoc ? { numPages: pdfDoc.numPages } : null,
                 currentPage: currentPageNum,
                 file: uploadInput.files[0]?.name || 'No file selected'
             });
-            
-            if (pdfDoc) {
-                pdfDoc.getMetadata().then(meta => {
-                    console.log('PDF Metadata:', meta);
-                }).catch(console.error);
-            }
         });
 
-        // Check for last PDF on page load
-        document.addEventListener('DOMContentLoaded', () => {
-            const lastPDF = sessionStorage.getItem('lastPDF');
-            if (lastPDF) {
-                fileNameDisplay.textContent = `Last opened: ${lastPDF}`;
-            }
-        });
-
-        // Setup copy page button
         copyPageBtn.addEventListener('click', () => {
             const pageContent = textDisplay.innerText;
             copyToClipboard(pageContent, copyPageBtn);
+        });
+
+        copyExplanationBtn.addEventListener('click', () => {
+            copyToClipboard(explanationText.textContent, copyExplanationBtn);
+        });
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const lastPDF = sessionStorage.getItem('lastPDF');
+            if (lastPDF) fileNameDisplay.textContent = `Last opened: ${lastPDF}`;
         });
     </script>
 </body>
