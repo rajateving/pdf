@@ -1,20 +1,21 @@
-// /api/explain-pdf.js
+// In file: /api/explain-pdf.js
+
+const https = require('https');
 
 const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
 
-// Helper for sending consistent and detailed error responses
-const errorResponse = (res, status, error, details = {}) => {
-  const errorId = Math.random().toString(36).substring(2, 9);
-  console.error(`API Error [${status}][${errorId}]:`, { error, ...details });
-  return res.status(status).json({
+// Helper function to send a consistent error response
+const sendError = (res, status, message, details = {}) => {
+  console.error("API Error:", { status, message, details });
+  res.status(status).json({
     success: false,
-    error: `${error} (ID: ${errorId})`,
-    details: details,
+    error: message,
+    details,
   });
 };
 
-export default async function handler(req, res) {
-  // Set CORS headers for all responses
+module.exports = async (req, res) => {
+  // Set CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
@@ -24,81 +25,85 @@ export default async function handler(req, res) {
   }
 
   if (req.method !== 'POST') {
-    return errorResponse(res, 405, 'Method Not Allowed');
+    return sendError(res, 405, 'Method Not Allowed');
   }
 
-  // --- 1. API Key Validation ---
+  // 1. Validate API Key from environment variables
   const apiKey = process.env.OPENROUTER_API_KEY;
-  if (!apiKey) {
-    return errorResponse(res, 500, 'Server Configuration Error', {
-      hint: 'The OPENROUTER_API_KEY is not set on the server. Make sure you have a .env.local file with the key and have restarted your server.'
-    });
-  }
-  if (!apiKey.startsWith('sk-or-')) {
-    return errorResponse(res, 500, 'Server Configuration Error', {
-      hint: 'The OpenRouter API key format is invalid. It must start with "sk-or-".'
+  if (!apiKey || !apiKey.startsWith('sk-or-')) {
+    return sendError(res, 500, 'Server Configuration Error', {
+      hint: 'The OPENROUTER_API_KEY is missing or invalid on the server. Ensure your .env.local file is correct and you have restarted the server.'
     });
   }
 
-  // --- 2. Request Body Validation ---
-  let text, pageNumber;
-  try {
-    text = req.body?.text?.trim();
-    if (!text) {
-      return errorResponse(res, 400, 'Bad Request', { hint: 'Missing or empty "text" parameter in the request body.' });
-    }
-    pageNumber = parseInt(req.body?.page_number, 10) || 1;
-  } catch (e) {
-    return errorResponse(res, 400, 'Bad Request', { hint: 'Could not parse request body. Ensure it is valid JSON.' });
+  // 2. Validate request body
+  const { text, page_number } = req.body;
+  if (!text || typeof text !== 'string' || text.trim().length === 0) {
+    return sendError(res, 400, 'Bad Request', { hint: 'Request body must include a non-empty "text" field.' });
   }
 
-  // --- 3. Prepare and Send Request to OpenRouter ---
+  // 3. Prepare the request to OpenRouter
+  const siteUrl = `http://${req.headers.host || 'localhost:3000'}`;
   
-  // **DYNAMIC REFERER FIX**: Automatically use your server's host or a default.
-  const siteUrl = `http://${req.headers.host}` || 'http://localhost:3000';
-
-  const headers = {
-    'Authorization': `Bearer ${apiKey}`,
-    'Content-Type': 'application/json',
-    'HTTP-Referer': siteUrl,
-    'X-Title': 'AI PDF Explainer'
-  };
-  
-  const payload = {
+  const payload = JSON.stringify({
     model: "google/gemini-flash-1.5",
     messages: [{
       role: "user",
-      content: `Explain the following text from page ${pageNumber} of a PDF. Be concise, clear, and focus on the main points (around 100-150 words).\n\nTEXT: "${text.substring(0, 15000)}"`
+      content: `Explain this text from a PDF page simply and concisely (100-150 words). Focus on the key takeaways.\n\nTEXT: "${text.substring(0, 15000)}"`
     }],
-  };
+  });
   
-  // Log what we are about to send (excluding the key itself)
-  console.log('Sending request to OpenRouter with headers (referer):', headers['HTTP-Referer']);
+  const options = {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': siteUrl,
+      'X-Title': 'AI PDF Explainer'
+    },
+    timeout: 30000, // 30 seconds
+  };
 
+  // 4. Make the API call
   try {
-    const response = await fetch(OPENROUTER_API_URL, {
-      method: 'POST',
-      headers: headers,
-      body: JSON.stringify(payload),
+    const apiReq = https.request(OPENROUTER_API_URL, options, (apiRes) => {
+      let responseBody = '';
+      apiRes.on('data', (chunk) => {
+        responseBody += chunk;
+      });
+
+      apiRes.on('end', () => {
+        try {
+          const data = JSON.parse(responseBody);
+          if (apiRes.statusCode >= 400) {
+            return sendError(res, apiRes.statusCode, 'AI service returned an error.', data.error);
+          }
+          
+          const explanation = data.choices?.[0]?.message?.content;
+          if (!explanation) {
+            return sendError(res, 502, 'Unexpected API response structure.', { api_response: data });
+          }
+          
+          res.status(200).json({ success: true, explanation });
+        } catch (e) {
+          sendError(res, 500, 'Failed to parse AI service response.', { raw_response: responseBody });
+        }
+      });
     });
 
-    const data = await response.json();
+    apiReq.on('error', (e) => {
+      sendError(res, 500, 'Failed to connect to AI service.', { error_message: e.message });
+    });
+    
+    apiReq.on('timeout', () => {
+      apiReq.destroy();
+      sendError(res, 504, 'Request to AI service timed out.');
+    });
 
-    if (!response.ok) {
-      console.error('OpenRouter Error Response:', data);
-      return errorResponse(res, response.status, 'AI service returned an error.', data.error || { hint: 'Check the OpenRouter dashboard for API key status or credit balance.' });
-    }
+    apiReq.write(payload);
+    apiReq.end();
 
-    const explanation = data.choices?.[0]?.message?.content;
-    if (!explanation) {
-      return errorResponse(res, 502, 'Unexpected API response structure.', { api_response: data });
-    }
-
-    return res.status(200).json({ success: true, explanation: explanation, model: data.model });
-
-  } catch (error) {
-    console.error('Fetch Error:', error);
-    return errorResponse(res, 500, 'Internal Server Error', { hint: `Failed to connect to the AI service. Error: ${error.message}` });
+  } catch (e) {
+    sendError(res, 500, 'An unexpected error occurred.', { error_message: e.message });
   }
-}
-
+};
