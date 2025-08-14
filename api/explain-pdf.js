@@ -1,6 +1,6 @@
 const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
 
-// Helper for standardized error responses
+// Standardized error responses
 const errorResponse = (res, status, error, details = {}) => {
     const errorId = Math.random().toString(36).substring(2, 9);
     console.error(API Error [${status}][${errorId}]:, { error, ...details });
@@ -34,6 +34,7 @@ export default async function handler(req, res) {
     // --- Parse Request Body ---
     let text, pageNumber;
     try {
+        // Plain Node doesn't parse JSON automatically, so we parse it manually
         const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
         text = body?.text?.trim();
         pageNumber = body?.page_number || 1;
@@ -44,12 +45,11 @@ export default async function handler(req, res) {
                 actual_length: text?.length || 0
             });
         }
-
     } catch (parseError) {
         return errorResponse(res, 400, 'Invalid JSON payload', { error: parseError.message });
     }
 
-    // --- Prepare Payload ---
+    // --- Prepare AI request ---
     const payload = {
         model: "google/gemini-2.5-flash-lite",
         messages: [
@@ -62,9 +62,9 @@ export default async function handler(req, res) {
         max_tokens: 300
     };
 
-    // --- Fetch from OpenRouter ---
+    // --- Fetch AI response with timeout ---
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 20000);
+    const timeout = setTimeout(() => controller.abort(), 20000); // 20s timeout
 
     try {
         const response = await fetch(OPENROUTER_API_URL, {
