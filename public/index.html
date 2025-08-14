@@ -49,6 +49,21 @@
             animation: spin 1s linear infinite;
             margin-left: 8px;
         }
+        .error-message {
+            background-color: rgba(239, 68, 68, 0.2);
+            border-left: 4px solid #ef4444;
+            padding: 12px;
+            margin: 12px 0;
+            border-radius: 4px;
+        }
+        .debug-info {
+            font-family: monospace;
+            font-size: 12px;
+            background-color: rgba(30, 41, 59, 0.8);
+            padding: 8px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
         @keyframes spin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
@@ -71,6 +86,7 @@
                 </label>
                 <input type="file" id="pdf-upload" class="hidden" accept=".pdf">
                 <p id="file-name" class="text-slate-400 mt-3 text-sm"></p>
+                <div id="upload-error" class="error-message hidden"></div>
             </div>
 
             <div id="viewer-section" class="hidden">
@@ -86,14 +102,16 @@
                             </button>
                         </div>
                         <p id="explanation-text" class="text-slate-300"></p>
+                        <div id="api-error" class="error-message hidden"></div>
+                        <div id="debug-info" class="debug-info hidden mt-4"></div>
                     </div>
                 </div>
 
                 <div class="flex flex-col sm:flex-row items-center justify-between gap-4">
                     <div class="flex items-center gap-3 bg-slate-900/70 p-2 rounded-lg">
-                        <button id="prev-page" class="px-4 py-2 rounded-md bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed transition">⬅️ Previous</button>
+                        <button id="prev-page" class="px-4 py-2 rounded-md bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed transition">⬅ Previous</button>
                         <span id="page-indicator" class="font-mono text-slate-300">Page 0 / 0</span>
-                        <button id="next-page" class="px-4 py-2 rounded-md bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed transition">Next ➡️</button>
+                        <button id="next-page" class="px-4 py-2 rounded-md bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed transition">Next ➡</button>
                     </div>
 
                     <button id="explain-button" class="w-full sm:w-auto bg-gradient-to-r from-indigo-500 to-cyan-500 hover:from-indigo-600 hover:to-cyan-600 text-white font-bold py-3 px-8 rounded-lg transition-transform transform hover:scale-105 shadow-md disabled:opacity-50 disabled:cursor-wait flex items-center justify-center">
@@ -122,6 +140,7 @@
         // DOM Elements
         const uploadInput = document.getElementById('pdf-upload');
         const fileNameDisplay = document.getElementById('file-name');
+        const uploadError = document.getElementById('upload-error');
         const viewerSection = document.getElementById('viewer-section');
         const textDisplay = document.getElementById('text-display');
         const prevButton = document.getElementById('prev-page');
@@ -130,6 +149,8 @@
         const explainButton = document.getElementById('explain-button');
         const explanationContainer = document.getElementById('explanation-container');
         const explanationText = document.getElementById('explanation-text');
+        const apiError = document.getElementById('api-error');
+        const debugInfo = document.getElementById('debug-info');
         const copyExplanationBtn = document.getElementById('copy-explanation-btn');
         const copyPageBtn = document.getElementById('copy-page-btn');
         const loadingSpinner = document.getElementById('loading-spinner');
@@ -140,30 +161,57 @@
         let currentPageNum = 1;
         let isProcessing = false;
         const MAX_CHARS = 15000;
+        const API_ENDPOINT = '/api/explain-pdf'; // Update this to your actual API endpoint
 
         // Helper Functions
+        function showError(element, message, details = null) {
+            element.textContent = message;
+            element.classList.remove('hidden');
+            
+            if (details) {
+                const detailsElement = document.createElement('div');
+                detailsElement.className = 'debug-info mt-2';
+                detailsElement.textContent = typeof details === 'string' ? details : JSON.stringify(details, null, 2);
+                element.appendChild(detailsElement);
+            }
+        }
+
+        function clearError(element) {
+            element.textContent = '';
+            element.classList.add('hidden');
+            while (element.firstChild) {
+                element.removeChild(element.firstChild);
+            }
+        }
+
         function copyToClipboard(text, button) {
             navigator.clipboard.writeText(text).then(() => {
                 const originalText = button.textContent;
                 button.textContent = 'Copied!';
                 setTimeout(() => button.textContent = originalText, 2000);
-            }).catch(console.error);
+            }).catch(err => {
+                console.error('Copy failed:', err);
+                showError(apiError, 'Failed to copy to clipboard', err.message);
+            });
         }
 
         function clearExplanations() {
             explanationText.textContent = '';
             explanationContainer.style.display = 'none';
+            clearError(apiError);
+            debugInfo.classList.add('hidden');
         }
 
         function appendExplanation(explanation) {
             explanationText.textContent = explanation;
             explanationContainer.style.display = 'block';
             explanationContainer.scrollIntoView({ behavior: 'smooth' });
+            clearError(apiError);
         }
 
         function updateControls() {
             if (pdfDoc) {
-                pageIndicator.textContent = `Page ${currentPageNum} / ${pdfDoc.numPages}`;
+                pageIndicator.textContent = Page ${currentPageNum} / ${pdfDoc.numPages};
                 prevButton.disabled = currentPageNum <= 1;
                 nextButton.disabled = currentPageNum >= pdfDoc.numPages;
             }
@@ -174,14 +222,20 @@
             const file = event.target.files[0];
             if (!file) return;
 
+            clearError(uploadError);
+
             const isPDF = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
             if (!isPDF) {
                 fileNameDisplay.textContent = 'Please select a valid PDF file.';
                 fileNameDisplay.style.color = 'red';
+                showError(uploadError, 'Invalid file type', {
+                    expected: 'application/pdf',
+                    received: file.type || 'unknown'
+                });
                 return;
             }
 
-            fileNameDisplay.textContent = `Loading: ${file.name}...`;
+            fileNameDisplay.textContent = Loading: ${file.name}...;
             fileNameDisplay.style.color = 'yellow';
             
             try {
@@ -192,19 +246,36 @@
                     cMapPacked: true
                 }).promise;
 
-                if (pdf.numPages < 1) throw new Error('PDF appears to be empty');
+                if (pdf.numPages < 1) {
+                    throw new Error('PDF appears to be empty (0 pages)');
+                }
                 
                 pdfDoc = pdf;
                 currentPageNum = 1;
                 viewerSection.classList.remove('hidden');
-                fileNameDisplay.textContent = `✅ Loaded: ${file.name}`;
+                fileNameDisplay.textContent = ✅ Loaded: ${file.name};
                 fileNameDisplay.style.color = 'lightgreen';
                 renderPage(currentPageNum);
+                
+                // Store last opened PDF
+                sessionStorage.setItem('lastPDF', file.name);
             } catch (error) {
                 console.error('PDF Error:', error);
-                fileNameDisplay.textContent = `❌ Error: ${error.message}`;
+                fileNameDisplay.textContent = ❌ Error loading PDF;
                 fileNameDisplay.style.color = 'red';
                 viewerSection.classList.add('hidden');
+                
+                let errorDetails = {
+                    name: error.name,
+                    message: error.message
+                };
+                
+                // Add specific PDF.js error details if available
+                if (error.name === 'InvalidPDFException') {
+                    errorDetails.pdfjsError = 'The PDF might be corrupted or encrypted';
+                }
+                
+                showError(uploadError, 'Failed to load PDF', errorDetails);
             }
         });
 
@@ -229,12 +300,16 @@
                 if (pageText.length > MAX_CHARS) {
                     const warning = document.createElement('div');
                     warning.className = 'text-yellow-400 text-sm mt-2';
-                    warning.textContent = `⚠️ Note: Only first ${MAX_CHARS.toLocaleString()} characters will be explained`;
+                    warning.textContent = ⚠ Note: Only first ${MAX_CHARS.toLocaleString()} characters will be explained;
                     textDisplay.appendChild(warning);
                 }
             } catch (error) {
                 console.error('Page Error:', error);
-                textDisplay.innerHTML = `<div class="text-red-400">Error loading page ${num}: ${error.message}</div>`;
+                textDisplay.innerHTML = <div class="text-red-400">Error loading page ${num}</div>;
+                showError(apiError, Failed to load page ${num}, {
+                    error: error.message,
+                    suggestion: 'Try a different PDF or check if the file is corrupted'
+                });
             } finally {
                 updateControls();
                 explainButton.disabled = !textDisplay.querySelector('p')?.textContent.trim() || 
@@ -267,9 +342,11 @@
             explainButton.disabled = true;
             explainButton.textContent = 'Thinking...';
             loadingSpinner.style.display = 'inline-block';
+            clearError(apiError);
             
             try {
-                const response = await fetch('/api/explain-pdf', {
+                const startTime = Date.now();
+                const response = await fetch(API_ENDPOINT, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ 
@@ -278,18 +355,64 @@
                     }),
                 });
 
+                const responseTime = Date.now() - startTime;
+                
                 if (!response.ok) {
-                    const errorData = await response.json().catch(() => ({}));
-                    throw new Error(errorData.error || `Request failed with status ${response.status}`);
+                    let errorDetails = {
+                        status: response.status,
+                        statusText: response.statusText,
+                        responseTime: ${responseTime}ms
+                    };
+                    
+                    try {
+                        const errorData = await response.json();
+                        errorDetails.apiError = errorData.error || 'No error details provided';
+                    } catch (e) {
+                        errorDetails.parseError = 'Could not parse error response';
+                    }
+                    
+                    throw new Error(API request failed with status ${response.status}, { cause: errorDetails });
                 }
 
                 const result = await response.json();
-                if (!result.explanation) throw new Error('Received empty explanation from AI');
+                
+                if (!result.explanation) {
+                    throw new Error('Received empty explanation from API', {
+                        cause: {
+                            response: result,
+                            responseTime: ${responseTime}ms
+                        }
+                    });
+                }
+                
+                // Show debug info
+                debugInfo.textContent = `API Response (${responseTime}ms): ${JSON.stringify({
+                    model: result.model,
+                    charsProcessed: pageText.length,
+                    explanationLength: result.explanation.length
+                }, null, 2)}`;
+                debugInfo.classList.remove('hidden');
                 
                 appendExplanation(result.explanation);
             } catch (error) {
-                console.error('Error:', error);
-                appendExplanation(`Error: ${error.message}`);
+                console.error('Explanation Error:', error);
+                
+                let errorDetails = {
+                    name: error.name,
+                    message: error.message
+                };
+                
+                if (error.cause) {
+                    errorDetails.details = error.cause;
+                }
+                
+                // Network error specific handling
+                if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
+                    errorDetails.suggestion = 'Check your internet connection or API endpoint URL';
+                }
+                
+                showError(apiError, 'Failed to get AI explanation', errorDetails);
+                appendExplanation('Could not get AI explanation. See error details below.');
             } finally {
                 explainButton.textContent = '🧠 Explain Page';
                 explainButton.disabled = !pageText || pageText === '[No text found on this page.]';
@@ -300,11 +423,30 @@
 
         // Debugging
         debugBtn.addEventListener('click', () => {
-            console.log('PDF State:', {
-                pdfDoc: pdfDoc ? { numPages: pdfDoc.numPages } : null,
-                currentPage: currentPageNum,
-                file: uploadInput.files[0]?.name || 'No file selected'
-            });
+            const state = {
+                pdfInfo: pdfDoc ? { 
+                    numPages: pdfDoc.numPages,
+                    fingerprint: pdfDoc.fingerprint,
+                    currentPage: currentPageNum
+                } : null,
+                fileInfo: uploadInput.files[0] ? {
+                    name: uploadInput.files[0].name,
+                    size: ${(uploadInput.files[0].size / 1024).toFixed(2)} KB,
+                    type: uploadInput.files[0].type
+                } : 'No file selected',
+                apiEndpoint: API_ENDPOINT,
+                environment: {
+                    online: navigator.onLine,
+                    pdfjsVersion: pdfjsLib.version
+                }
+            };
+            
+            console.log('Debug State:', state);
+            
+            // Show in UI
+            debugInfo.textContent = Debug Info:\n${JSON.stringify(state, null, 2)};
+            debugInfo.classList.remove('hidden');
+            debugInfo.scrollIntoView({ behavior: 'smooth' });
         });
 
         copyPageBtn.addEventListener('click', () => {
@@ -316,9 +458,17 @@
             copyToClipboard(explanationText.textContent, copyExplanationBtn);
         });
 
+        // Initialize
         document.addEventListener('DOMContentLoaded', () => {
             const lastPDF = sessionStorage.getItem('lastPDF');
-            if (lastPDF) fileNameDisplay.textContent = `Last opened: ${lastPDF}`;
+            if (lastPDF) fileNameDisplay.textContent = Last opened: ${lastPDF};
+            
+            // Check API endpoint
+            if (API_ENDPOINT === '/api/explain-pdf') {
+                showError(uploadError, 'Warning: Using default API endpoint', {
+                    suggestion: 'Update the API_ENDPOINT variable to point to your actual API'
+                });
+            }
         });
     </script>
 </body>
