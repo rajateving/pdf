@@ -72,7 +72,8 @@ export default async function handler(req, res) {
 
         // Prepare AI request
         const payload = {
-            model: "google/gemini-pro",
+            model: "google/gemini-2.5-flash-lite
+",
             messages: [{
                 role: "user",
                 content: `Explain this PDF content from page ${pageNumber} in simple terms (100-150 words):\n\n${cleanText}`
@@ -136,3 +137,4 @@ export default async function handler(req, res) {
         });
     }
 }
+
