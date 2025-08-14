@@ -101,3 +101,4 @@ export default async function handler(req, res) {
     return errorResponse(res, 500, 'Internal Server Error', { hint: `Failed to connect to the AI service. Error: ${error.message}` });
   }
 }
+
