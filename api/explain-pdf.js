@@ -65,7 +65,7 @@ export default async function handler(req, res) {
 
   // --- Prepare and Send Request to OpenRouter ---
   const payload = {
-    model: "google/gemini-2.5-flash-lite", // Using a reliable and fast model
+    model: "google/gemini-flash-1.5", // Using a reliable and fast model
     messages: [
       {
         role: "user",
