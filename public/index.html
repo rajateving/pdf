@@ -1,103 +1,191 @@
-// /api/explain-pdf.js
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI PDF Explainer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #1e293b; }
+        ::-webkit-scrollbar-thumb { background: #475569; border-radius: 10px; }
+        .glassmorphism { background: rgba(30, 41, 59, 0.6); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid rgba(71, 85, 105, 0.3); }
+        #loading-spinner { display: none; border: 2px solid rgba(255,255,255,0.3); border-radius: 50%; border-top: 2px solid white; width: 16px; height: 16px; animation: spin 1s linear infinite; margin-left: 8px; }
+        .error-message { background-color: rgba(239, 68, 68, 0.2); border-left: 4px solid #ef4444; padding: 12px; margin: 12px 0; border-radius: 4px; }
+        .debug-info { font-family: monospace; font-size: 12px; white-space: pre-wrap; word-break: break-all; background-color: rgba(30, 41, 59, 0.8); padding: 8px; border-radius: 4px; overflow-x: auto; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-200 flex flex-col items-center min-h-screen p-4">
+    <div class="w-full max-w-4xl mx-auto">
+        <header class="text-center mb-6">
+            <h1 class="text-4xl md:text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-cyan-400">📖 AI PDF Explainer</h1>
+            <p class="text-slate-400 mt-2">Upload a PDF, and let AI explain each page in simple terms.</p>
+        </header>
 
-const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
+        <div class="glassmorphism rounded-2xl shadow-2xl p-6 md:p-8 w-full">
+            <div id="upload-section" class="text-center mb-6">
+                <label for="pdf-upload" class="cursor-pointer inline-block bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-6 rounded-lg transition-transform transform hover:scale-105 shadow-lg">📂 Open PDF</label>
+                <input type="file" id="pdf-upload" class="hidden" accept=".pdf">
+                <p id="file-name" class="text-slate-400 mt-3 text-sm"></p>
+                <div id="upload-error" class="error-message hidden"></div>
+            </div>
 
-// Helper for sending consistent and detailed error responses
-const errorResponse = (res, status, error, details = {}) => {
-  const errorId = Math.random().toString(36).substring(2, 9);
-  console.error(`API Error [${status}][${errorId}]:`, { error, ...details });
-  return res.status(status).json({
-    success: false,
-    error: `${error} (ID: ${errorId})`,
-    details: details,
-  });
-};
+            <div id="viewer-section" class="hidden">
+                <div id="text-display-container" class="bg-slate-900/70 rounded-lg p-4 h-96 overflow-y-auto border border-slate-700 mb-4">
+                    <div id="text-display" class="whitespace-pre-wrap text-slate-300">Select a PDF to get started.</div>
+                    <div id="explanation-container" class="mt-4 p-4 bg-slate-800/50 rounded-lg border border-slate-700 hidden">
+                        <h4 class="text-lg font-bold text-green-400">🧠 AI Explanation</h4>
+                        <p id="explanation-text" class="text-slate-300 mt-2"></p>
+                        <div id="api-error" class="error-message hidden mt-4"></div>
+                    </div>
+                </div>
+                <div class="flex flex-col sm:flex-row items-center justify-between gap-4">
+                    <div class="flex items-center gap-3 bg-slate-900/70 p-2 rounded-lg">
+                        <button id="prev-page" class="px-4 py-2 rounded-md bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed transition">⬅</button>
+                        <span id="page-indicator" class="font-mono text-slate-300">Page 0 / 0</span>
+                        <button id="next-page" class="px-4 py-2 rounded-md bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed transition">➡</button>
+                    </div>
+                    <button id="explain-button" class="w-full sm:w-auto bg-gradient-to-r from-indigo-500 to-cyan-500 hover:from-indigo-600 hover:to-cyan-600 text-white font-bold py-3 px-8 rounded-lg transition-transform transform hover:scale-105 shadow-md disabled:opacity-50 disabled:cursor-wait flex items-center justify-center">
+                        Explain Page <span id="loading-spinner"></span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script>
+        const pdfjsLib = window['pdfjs-dist/build/pdf'];
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@2.11.338/build/pdf.worker.min.js';
 
-export default async function handler(req, res) {
-  // Set CORS headers for all responses
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+        const uploadInput = document.getElementById('pdf-upload');
+        const fileNameDisplay = document.getElementById('file-name');
+        const uploadError = document.getElementById('upload-error');
+        const viewerSection = document.getElementById('viewer-section');
+        const textDisplay = document.getElementById('text-display');
+        const prevButton = document.getElementById('prev-page');
+        const nextButton = document.getElementById('next-page');
+        const pageIndicator = document.getElementById('page-indicator');
+        const explainButton = document.getElementById('explain-button');
+        const explanationContainer = document.getElementById('explanation-container');
+        const explanationText = document.getElementById('explanation-text');
+        const apiError = document.getElementById('api-error');
+        const loadingSpinner = document.getElementById('loading-spinner');
 
-  if (req.method === 'OPTIONS') {
-    return res.status(204).end();
-  }
+        let pdfDoc = null;
+        let currentPageNum = 1;
+        let isProcessing = false;
+        const API_ENDPOINT = '/api/explain-pdf';
 
-  if (req.method !== 'POST') {
-    return errorResponse(res, 405, 'Method Not Allowed');
-  }
+        const showError = (element, message, details = null) => {
+            let content = `<p class="font-bold">${message}</p>`;
+            if (details) {
+                content += `<div class="debug-info mt-2">${typeof details === 'string' ? details : JSON.stringify(details, null, 2)}</div>`;
+            }
+            element.innerHTML = content;
+            element.classList.remove('hidden');
+        };
 
-  // --- 1. API Key Validation ---
-  const apiKey = process.env.OPENROUTER_API_KEY;
-  if (!apiKey) {
-    return errorResponse(res, 500, 'Server Configuration Error', {
-      hint: 'The OPENROUTER_API_KEY is not set on the server. Make sure you have a .env.local file with the key and have restarted your server.'
-    });
-  }
-  if (!apiKey.startsWith('sk-or-')) {
-    return errorResponse(res, 500, 'Server Configuration Error', {
-      hint: 'The OpenRouter API key format is invalid. It must start with "sk-or-".'
-    });
-  }
+        const clearError = (element) => {
+            element.innerHTML = '';
+            element.classList.add('hidden');
+        };
 
-  // --- 2. Request Body Validation ---
-  let text, pageNumber;
-  try {
-    text = req.body?.text?.trim();
-    if (!text) {
-      return errorResponse(res, 400, 'Bad Request', { hint: 'Missing or empty "text" parameter in the request body.' });
-    }
-    pageNumber = parseInt(req.body?.page_number, 10) || 1;
-  } catch (e) {
-    return errorResponse(res, 400, 'Bad Request', { hint: 'Could not parse request body. Ensure it is valid JSON.' });
-  }
+        const renderPage = async (num) => {
+            if (!pdfDoc) return;
+            isProcessing = true;
+            explainButton.disabled = true;
+            explanationContainer.classList.add('hidden');
+            clearError(apiError);
+            textDisplay.textContent = 'Loading page content...';
 
-  // --- 3. Prepare and Send Request to OpenRouter ---
-  
-  // **DYNAMIC REFERER FIX**: Automatically use your server's host or a default.
-  const siteUrl = `http://${req.headers.host}` || 'http://localhost:3000';
+            try {
+                const page = await pdfDoc.getPage(num);
+                const textContent = await page.getTextContent();
+                const pageText = textContent.items.map(item => item.str).join(' ').trim();
+                textDisplay.textContent = pageText || '[No text found on this page.]';
+                explainButton.disabled = !pageText;
+            } catch (error) {
+                textDisplay.textContent = `Error loading page ${num}.`;
+                console.error('Page Render Error:', error);
+            } finally {
+                currentPageNum = num;
+                pageIndicator.textContent = `Page ${num} / ${pdfDoc.numPages}`;
+                prevButton.disabled = num <= 1;
+                nextButton.disabled = num >= pdfDoc.numPages;
+                isProcessing = false;
+            }
+        };
 
-  const headers = {
-    'Authorization': `Bearer ${apiKey}`,
-    'Content-Type': 'application/json',
-    'HTTP-Referer': siteUrl,
-    'X-Title': 'AI PDF Explainer'
-  };
-  
-  const payload = {
-    model: "google/gemini-flash-1.5",
-    messages: [{
-      role: "user",
-      content: `Explain the following text from page ${pageNumber} of a PDF. Be concise, clear, and focus on the main points (around 100-150 words).\n\nTEXT: "${text.substring(0, 15000)}"`
-    }],
-  };
-  
-  // Log what we are about to send (excluding the key itself)
-  console.log('Sending request to OpenRouter with headers (referer):', headers['HTTP-Referer']);
+        uploadInput.addEventListener('change', async (event) => {
+            const file = event.target.files[0];
+            if (!file || file.type !== 'application/pdf') {
+                showError(uploadError, 'Please select a valid PDF file.');
+                return;
+            }
+            clearError(uploadError);
+            fileNameDisplay.textContent = `Loading: ${file.name}`;
+            
+            try {
+                const arrayBuffer = await file.arrayBuffer();
+                pdfDoc = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
+                fileNameDisplay.textContent = `✅ Loaded: ${file.name}`;
+                viewerSection.classList.remove('hidden');
+                renderPage(1);
+            } catch (error) {
+                console.error('PDF Load Error:', error);
+                fileNameDisplay.textContent = '❌ Error loading PDF.';
+                showError(uploadError, 'Failed to load PDF.', { name: error.name, message: error.message });
+            }
+        });
 
-  try {
-    const response = await fetch(OPENROUTER_API_URL, {
-      method: 'POST',
-      headers: headers,
-      body: JSON.stringify(payload),
-    });
+        prevButton.addEventListener('click', () => !isProcessing && currentPageNum > 1 && renderPage(currentPageNum - 1));
+        nextButton.addEventListener('click', () => !isProcessing && currentPageNum < pdfDoc.numPages && renderPage(currentPageNum + 1));
 
-    const data = await response.json();
+        explainButton.addEventListener('click', async () => {
+            if (isProcessing) return;
+            isProcessing = true;
+            explainButton.disabled = true;
+            loadingSpinner.style.display = 'inline-block';
+            clearError(apiError);
 
-    if (!response.ok) {
-      console.error('OpenRouter Error Response:', data);
-      return errorResponse(res, response.status, 'AI service returned an error.', data.error || { hint: 'Check the OpenRouter dashboard for API key status or credit balance.' });
-    }
+            const pageText = textDisplay.textContent;
 
-    const explanation = data.choices?.[0]?.message?.content;
-    if (!explanation) {
-      return errorResponse(res, 502, 'Unexpected API response structure.', { api_response: data });
-    }
+            try {
+                const response = await fetch(API_ENDPOINT, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: pageText, page_number: currentPageNum }),
+                });
 
-    return res.status(200).json({ success: true, explanation: explanation, model: data.model });
+                const result = await response.json();
 
-  } catch (error) {
-    console.error('Fetch Error:', error);
-    return errorResponse(res, 500, 'Internal Server Error', { hint: `Failed to connect to the AI service. Error: ${error.message}` });
-  }
-}
+                if (!response.ok) {
+                    throw result;
+                }
+
+                explanationText.textContent = result.explanation;
+                explanationContainer.classList.remove('hidden');
+                explanationContainer.scrollIntoView({ behavior: 'smooth' });
+
+            } catch (error) {
+                console.error('Explanation Fetch Error:', error);
+                const errorMessage = error.error || 'Failed to get explanation.';
+                const errorDetails = error.details || { hint: 'Check the browser console (F12) and your server logs for more information.' };
+                showError(apiError, errorMessage, errorDetails);
+                explanationContainer.classList.remove('hidden');
+                explanationText.textContent = 'An error occurred. See details below.';
+                explanationContainer.scrollIntoView({ behavior: 'smooth' });
+            } finally {
+                isProcessing = false;
+                explainButton.disabled = false;
+                loadingSpinner.style.display = 'none';
+            }
+        });
+    </script>
+</body>
+</html>
