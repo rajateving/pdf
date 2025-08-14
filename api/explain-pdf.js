@@ -46,7 +46,7 @@ module.exports = async (req, res) => {
   const siteUrl = `http://${req.headers.host || 'localhost:3000'}`;
   
   const payload = JSON.stringify({
-    model: "google/gemini-flash-1.5",
+    model: "google/gemini-2.5-flash-lite",
     messages: [{
       role: "user",
       content: `Explain this text from a PDF page simply and concisely (100-150 words). Focus on the key takeaways.\n\nTEXT: "${text.substring(0, 15000)}"`
@@ -107,3 +107,4 @@ module.exports = async (req, res) => {
     sendError(res, 500, 'An unexpected error occurred.', { error_message: e.message });
   }
 };
+
